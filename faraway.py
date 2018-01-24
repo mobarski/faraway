@@ -2,6 +2,16 @@ import subprocess
 import tempfile
 import textwrap
 
+# TODO: atomic copy -> filename.partial renamed to filename at the end
+# TODO: hadoop streaming
+# TODO: load partition
+# TODO: load przez kopiowanie danych
+# TODO: transform (hive sql)
+# TODO: pobranie wartosci z wyniku SQLa do zmiennych
+# TODO: testy automatyczne
+# TODO: przyklady
+# TODO: execute przyjmuje str/unicode jako stdin
+
 class raw_host:	
 	def __init__(self, host='', ssh='ssh', scp='scp'):
 		self.host = host
@@ -177,9 +187,6 @@ class host(raw_host):
 		self.after += ['hdfs dfs -rm -r -f '+hdfs_path] # TODO jako opcja?
 		self.download_from_hdfs(path,hdfs_path)
 
-	# TODO import partition
-	# TODO hadoop streaming
-
 # --- helpers ------------------------------------------------------------------
 
 import hashlib
@@ -209,33 +216,3 @@ def columns(col_str,default='string',types_str='',sep1='\s+',sep2=':'):
 		out += [(name,t)]
 	return ',  '.join([' '.join(c) for c in out])
 
-# ------------------------------------------------------------------------------
-
-def test1():
-	with host('','cat','cat') as h:
-		h.set('hive','beeline -u "jdbc:hive2://xxx.aaa.bbb.ccc:10000/;principal=hive/xxx.aaa.bbb@zzz.vvv.bbb?mapreduce.job.queuename=abcd" --showHeader=false')
-		h.set('x','abc')
-		h.set('y','test {x} ok')
-		h.tmp('xxx','f1')
-		h.tmp('yyy','f2')
-		h.tmp('{y}','f3')
-		h.tmp(var='f4')
-		h.cmd('{hive} -f {f1} >{f4}')
-		s = h.get_script()
-		print(s)
-		h.run()
-		h.download('test_f3.txt','{f3}')
-
-
-def test2():
-	print(columns('a b c d:i e:i f:ai','string','i:bigint ai:array<int>'))
-
-def test3():
-	with host('','cat','cat') as h:
-		h.set('hive','beeline')
-		cols = columns('a b c d')
-		h.load('ppp','ttt','idir',cols)
-		print(h.get_script())
-
-if __name__=="__main__":
-	test1()
