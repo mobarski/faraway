@@ -10,5 +10,5 @@ Example:
 ```
 from faraway import host
 h = host('user@host.com')
-h.export_csv('products.csv','select * from dwh.dict_products')
+h.export('products.csv', 'select * from dwh.dict_products', sep=',')
 ```

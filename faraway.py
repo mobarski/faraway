@@ -130,7 +130,7 @@ class host(raw_host):
 		self.run()
 		self.execute('hdfs dfs -put - {0}'.format(hdfs_path), before=pipe_cmd+' | ', stdin=stdin)
 
-	def import_csv(self, path, table, columns, sep=','):
+	def load(self, path, table, columns, sep=r'\t'):
 		# TODO zalozenie tabeli w konkretnym miejsu i upload partycji???
 		# TODO elegancka obsluga columns???
 		# TODO table comment???
@@ -156,7 +156,7 @@ class host(raw_host):
 		self.after += ['hdfs dfs -rm -r -f '+hdfs_path] # TODO jako opcja?
 		self.run()
 	
-	def extract_csv(self, path, sql, sep=r'\t', csep=',', ksep=':'):
+	def extract(self, path, sql, sep=r'\t', csep=',', ksep=':'):
 		name = random_name(self.host,sql,'extract')
 		hdfs_path = '{}/{}'.format(self.var['hdfs_tmp_dir'],name)
 		
@@ -234,7 +234,7 @@ def test3():
 	with host('','cat','cat') as h:
 		h.set('hive','beeline')
 		cols = columns('a b c d')
-		h.import_csv('ppp','ttt','idir',cols)
+		h.load('ppp','ttt','idir',cols)
 		print(h.get_script())
 
 if __name__=="__main__":
