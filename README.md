@@ -9,6 +9,6 @@ no dependencies other than the Python Standard Library.
 Example:
 ```
 from faraway import host
-h = host('user@host.com')
-h.extract('products.csv', 'select * from dwh.dict_products', sep=',')
+with host('user@host.com') as h:
+	h.extract('products.csv', 'select * from dwh.dict_products', sep=',')
 ```
