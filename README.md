@@ -4,7 +4,7 @@ It is distributed as a single file module and has
 no dependencies other than the Python Standard Library.
 
 * **simple** - convenient access to hadoop ETL functionality 
-* **portable** - runs on Python 2.7 and 3+, Windows and Unix
+* **portable** - runs on Python 2.7 and 3+, on Windows and Unix
 
 Example:
 ```
