@@ -3,12 +3,15 @@ Faraway facilitates remote Hadoop operations via SSH.
 It is distributed as a single file module and has
 no dependencies other than the Python Standard Library.
 
-* **simple** - convenient access to ETL functionality on Hadoop
+* **easy** - convenient access to ETL functionality on Hadoop
+* **simple** - 
 * **portable** - runs on Python 2.7 and 3+, on Windows and Unix
 
 Example:
 ```
 from faraway import host
 with host('user@host.com') as h:
-	h.extract('products.csv', 'select * from dwh.dict_products', sep=',')
+	h.extract('products_sample.csv', 'select * from dwh.dict_products limit 1000', sep=',')
+	h.transform('drop table stage.assets')
+	h.load('dict_terminals.tsv','stage.dict_terminals','trm_code INT, trm_name STRING')
 ```

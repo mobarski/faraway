@@ -1,4 +1,5 @@
 
+# https://hadoop.apache.org/docs/current/hadoop-streaming/HadoopStreaming.html
 # https://hadoop.apache.org/docs/r1.2.1/streaming.html
 # http://www.michael-noll.com/tutorials/writing-an-hadoop-mapreduce-program-in-python/
 # https://blog.cloudera.com/blog/2013/01/a-guide-to-python-frameworks-for-hadoop/
@@ -38,7 +39,7 @@ def get_fun_body(f):
 print(get_fun_body(my_combiner))
 exit()
 
-h.mapreduce(m=my_mapper, r=my_reducer, c=my_combiner, input='/test/in/*', output='/test/out')
+h.mapred(m=my_mapper, r=my_reducer, c=my_combiner, input='/test/in/*', output='/test/out')
 
 """
 hadoop jar contrib/streaming/hadoop-*streaming*.jar \
