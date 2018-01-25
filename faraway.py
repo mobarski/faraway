@@ -199,26 +199,31 @@ class hadoop(unix):
 		self.cmd('{hive} -f '+sql_path)
 	
 	def mapred(self, m=None, r=None, c=None, input=None, output=None):
-		cmd = "hadoop jar contrib/streaming/hadoop-*streaming*.jar"
+		# TODO tekst - kod pythona jako m,r,c
+		self.cmd('hdfs dfs -rm -r -f '+output) # TODO jako opcja
+		cmd = "hadoop jar /opt/cloudera/parcels/CDH/jars/hadoop-streaming-2.6.0-mr1-cdh5.10.1.jar" # TODO jako zmienna
 		# TODO sum,min,max reducers ???
 		if m: # MAPPER
 			if callable(m):
 				m_py = self.tmp(get_fun_body(m), suffix='.py')
+				cmd += ' -file {0} -mapper {0}'.format(m_py)
+				self.cmd('chmod u+x '+m_py)
 			else:
-				m_py = m
-			cmd += ' -file {0} -mapper {0}'.format(m_py)
+				cmd += ' -mapper {0}'.format(m)
 		if r: # REDUCER
 			if callable(r):
 				r_py = self.tmp(get_fun_body(r), suffix='.py')
+				cmd += ' -file {0} -reducer {0}'.format(r_py)
+				self.cmd('chmod u+x '+r_py)
 			else:
-				r_py = r
-			cmd += ' -file {0} -reducer {0}'.format(r_py)
+				cmd += ' -reducer {0}'.format(r)
 		if c: # COMBINER
 			if callable(c):
 				c_py = self.tmp(get_fun_body(c), suffix='.py')
+				cmd += ' -file {0} -combiner {0}'.format(c_py)
+				self.cmd('chmod u+x '+c_py)
 			else:
-				c_py = c
-			cmd += ' -file {0} -combiner {0}'.format(c_py)
+				cmd += ' -combiner {0}'.format(c)
 		# INPUT
 		if type(input) in (str,unicode):
 			cmd += ' -input '+input
