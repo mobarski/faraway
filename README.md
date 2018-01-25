@@ -8,6 +8,13 @@ no dependencies other than the Python Standard Library.
 
 Example:
 ```
+from faraway import hadoop
+h = hadoop('user123@host.com')
+h.extract('products_sample.csv', 'select * from dwh.dict_products limit 1000', sep=',')
+```
+
+Example:
+```
 import faraway
 with faraway.hadoop('user123@host.com') as h:
 	h.extract('products_sample.csv', 'select * from dwh.dict_products limit 1000', sep=',')
