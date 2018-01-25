@@ -1,5 +1,7 @@
+import faraway
+
 def test1():
-	with host('','cat','cat') as h:
+	with faraway.unix('','cat','cat') as h:
 		h.set('hive','beeline -u "jdbc:hive2://xxx.aaa.bbb.ccc:10000/;principal=hive/xxx.aaa.bbb@zzz.vvv.bbb?mapreduce.job.queuename=abcd" --showHeader=false')
 		h.set('x','abc')
 		h.set('y','test {x} ok')
@@ -15,14 +17,14 @@ def test1():
 
 
 def test2():
-	print(columns('a b c d:i e:i f:ai','string','i:bigint ai:array<int>'))
+	print(faraway.columns('a b c d:i e:i f:ai','string','i:bigint ai:array<int>'))
 
 def test3():
-	with host('','cat','cat') as h:
+	with faraway.unix('','cat','cat') as h:
 		h.set('hive','beeline')
 		cols = columns('a b c d')
 		h.load('ppp','ttt','idir',cols)
 		print(h.get_script())
 
 if __name__=="__main__":
-	test1()
+	test2()

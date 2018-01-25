@@ -12,7 +12,8 @@ import textwrap
 # TODO: przyklady
 # TODO: execute przyjmuje str/unicode jako stdin
 
-class raw_host:	
+class unix:
+	"unix host"
 	def __init__(self, host='', ssh='ssh', scp='scp'):
 		self.host = host
 		self.ssh = ssh
@@ -116,11 +117,11 @@ class raw_host:
 
 # ------------------------------------------------------------------------------
 
-class host(raw_host):
+class hadoop(unix):
 	"hadoop host"
 	
 	def __init__(self, host='', ssh='ssh', scp='scp'):
-		raw_host.__init__(self, host, ssh, scp)
+		unix.__init__(self, host, ssh, scp)
 		self.var['hive'] = 'hive'
 		self.var['hdfs_tmp_dir'] = '/tmp'
 
