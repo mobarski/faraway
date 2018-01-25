@@ -2,6 +2,7 @@ import subprocess
 import tempfile
 import textwrap
 
+# TODO: przepisac TODO do gita
 # TODO: atomic copy -> filename.partial renamed to filename at the end
 # TODO: hadoop streaming
 # TODO: load partition
@@ -11,6 +12,7 @@ import textwrap
 # TODO: testy automatyczne
 # TODO: przyklady
 # TODO: execute przyjmuje str/unicode jako stdin
+# TODO: pobieranie metadanych
 
 class unix:
 	"unix host"
@@ -26,7 +28,7 @@ class unix:
 		return self
 	
 	def __exit__(self,et,ev,tb):
-		#self.run() # ?????
+		#self.run() # TODO handle exceptions and ALWAYS run self.clean()
 		self.clean()
 	
 	def clean(self):
@@ -46,7 +48,7 @@ class unix:
 		"get variable value or None if var doesnt exists"
 		return self.var.get(var_name)
 	
-	def tmp(self, text='', var='', eof='EOF', prefix='{tmp_dir}', suffix='', dedent=True):
+	def tmp(self, text='', var='', eof='EOF', prefix='{tmp_dir}', suffix='', dedent=True, clean=True):
 		"create temporary file and store its path in a variable"
 		if dedent:
 			text = textwrap.dedent(text).strip()
@@ -57,7 +59,9 @@ class unix:
 		if text:
 			self.script += ['cat >{0} <<{2}\n{1}\n{2}'.format(path,text.format(**self.var),eof)]
 		else:
-			self.script += ['touch {0}'.format(path)]
+			self.script += ['touch '+path]
+		if clean:
+			self.after += ['rm '+path]
 		return path
 	
 	def cmd(self, text):
@@ -141,7 +145,7 @@ class hadoop(unix):
 		self.run()
 		self.execute('hdfs dfs -put - {0}'.format(hdfs_path), before=pipe_cmd+' | ', stdin=stdin)
 
-	def load(self, path, table, columns, sep=r'\t'):
+	def load(self, path, table, columns, sep=r'\t', clean=True):
 		# TODO zalozenie tabeli w konkretnym miejsu i upload partycji???
 		# TODO elegancka obsluga columns???
 		# TODO table comment???
@@ -164,14 +168,15 @@ class hadoop(unix):
 		""".format(**locals())
 		path = self.tmp(script, suffix='.sql')
 		self.cmd('{hive} -f '+path)
-		self.after += ['hdfs dfs -rm -r -f '+hdfs_path] # TODO jako opcja?
+		if clean:
+			self.after += ['hdfs dfs -rm -r -f '+hdfs_path]
 		self.run()
 	
-	def extract(self, path, sql, sep=r'\t', csep=',', ksep=':'):
+	def extract(self, path, sql, sep=r'\t', csep=',', ksep=':', clean=True):
 		name = random_name(self.host,sql,'extract')
 		hdfs_path = '{}/{}'.format(self.var['hdfs_tmp_dir'],name)
 		
-		self.cmd('hdfs dfs -rm -r -f '+hdfs_path) # TODO jako opcja?
+		#self.cmd('hdfs dfs -rm -r -f '+hdfs_path) # TODO jako opcja?
 		script = """
 		insert overwrite directory '{hdfs_path}'
 			row format delimited
@@ -185,26 +190,69 @@ class hadoop(unix):
 		""".format(**locals())
 		sql_path = self.tmp(script, suffix='.sql')
 		self.cmd('{hive} -f '+sql_path)
-		self.after += ['hdfs dfs -rm -r -f '+hdfs_path] # TODO jako opcja?
+		if clean:
+			self.after += ['hdfs dfs -rm -r -f '+hdfs_path]
 		self.download_from_hdfs(path,hdfs_path)
+	
+	def transform(self, sql):
+		sql_path = self.tmp(sql, suffix='.sql')
+		self.cmd('{hive} -f '+sql_path)
+	
+	def mapred(self, m=None, r=None, c=None, input=None, output=None):
+		cmd = "hadoop jar contrib/streaming/hadoop-*streaming*.jar"
+		# TODO sum,min,max reducers ???
+		if m: # MAPPER
+			if callable(m):
+				m_py = self.tmp(get_fun_body(m), suffix='.py')
+			else:
+				m_py = m
+			cmd += ' -file {0} -mapper {0}'.format(m_py)
+		if r: # REDUCER
+			if callable(r):
+				r_py = self.tmp(get_fun_body(r), suffix='.py')
+			else:
+				r_py = r
+			cmd += ' -file {0} -reducer {0}'.format(r_py)
+		if c: # COMBINER
+			if callable(c):
+				c_py = self.tmp(get_fun_body(c), suffix='.py')
+			else:
+				c_py = c
+			cmd += ' -file {0} -combiner {0}'.format(c_py)
+		# INPUT
+		if type(input) in (str,unicode):
+			cmd += ' -input '+input
+		else:
+			for x in input:
+				cmd += ' -input '+x
+		# OUTPUT
+		cmd += ' -output '+output
+		self.cmd(cmd)
 
 # --- helpers ------------------------------------------------------------------
 
-import hashlib
-import re
-
-def random_name(text='',text2='',label='',length=6):
+def random_name(text='',text2='',label='',length=6,sep='-'):
+	import hashlib
 	import random
 	out = hashlib.sha1(text).hexdigest()[:length]
-	out += '-'+hashlib.sha1(text2).hexdigest()[:length]
-	out += '-'
+	out += sep+hashlib.sha1(text2).hexdigest()[:length]
+	out += sep
 	for i in range(length):
 		out += random.choice('qwertyuiopasdfghjklzxcvbnm1234567890')
 	if label:
-		out += '-'+label
+		out += sep+label
 	return out
 
+
+def get_fun_body(f):
+	import inspect
+	import textwrap
+	code = inspect.getsourcelines(f)
+	return textwrap.dedent(''.join(code[0][1:]))
+
+
 def columns(col_str,default='string',types_str='',sep1='\s+',sep2=':'):
+	import re
 	out = []
 	types = {}
 	for ts in re.split(sep1,types_str):
