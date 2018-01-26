@@ -4,10 +4,8 @@ import textwrap
 
 # TODO: przepisac TODO do gita
 # TODO: atomic copy -> filename.partial renamed to filename at the end
-# TODO: hadoop streaming
 # TODO: load partition
 # TODO: load przez kopiowanie danych
-# TODO: transform (hive sql)
 # TODO: pobranie wartosci z wyniku SQLa do zmiennych
 # TODO: testy automatyczne
 # TODO: przyklady
@@ -208,21 +206,21 @@ class hadoop(unix):
 			cmd += ' -D mapred.map.tasks='+str(mcnt)
 		if m: # MAPPER
 			if callable(m):
-				m_py = self.tmp(get_fun_body(m), suffix='.py')
+				m_py = self.tmp(fun_to_script(m), suffix='.py')
 				cmd += ' -file {0} -mapper {0}'.format(m_py)
 				self.cmd('chmod u+x '+m_py)
 			else:
 				cmd += """ -mapper '{0}'""".format(m)
 		if r: # REDUCER
 			if callable(r):
-				r_py = self.tmp(get_fun_body(r), suffix='.py')
+				r_py = self.tmp(fun_to_script(r), suffix='.py')
 				cmd += ' -file {0} -reducer {0}'.format(r_py)
 				self.cmd('chmod u+x '+r_py)
 			else:
 				cmd += """ -reducer '{0}'""".format(r)
 		if c: # COMBINER
 			if callable(c):
-				c_py = self.tmp(get_fun_body(c), suffix='.py')
+				c_py = self.tmp(fun_to_script(c), suffix='.py')
 				cmd += ' -file {0} -combiner {0}'.format(c_py)
 				self.cmd('chmod u+x '+c_py)
 			else:
@@ -257,11 +255,14 @@ def random_name(text='',text2='',label='',length=6,sep='-'):
 	return out
 
 
-def get_fun_body(f):
+def fun_to_script(f,shebang=True):
 	import inspect
 	import textwrap
 	code = inspect.getsourcelines(f)
-	return textwrap.dedent(''.join(code[0][1:]))
+	script = textwrap.dedent(''.join(code[0][1:]))
+	if shebang and not script.startswith('#!'):
+		script = '#!/usr/bin/env python\n'+script
+	return script
 
 
 def columns(col_str,default='string',types_str='',sep1='\s+',sep2=':'):
