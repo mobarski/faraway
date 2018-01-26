@@ -198,32 +198,35 @@ class hadoop(unix):
 		sql_path = self.tmp(sql, suffix='.sql')
 		self.cmd('{hive} -f '+sql_path)
 	
-	def mapred(self, m=None, r=None, c=None, input=None, output=None):
+	def mapred(self, m=None, r=None, c=None, input=None, output=None, mcnt=None, rcnt=None, verbose=False):
 		# TODO tekst - kod pythona jako m,r,c
+		# TODO sum,min,max reducers ???
 		self.cmd('hdfs dfs -rm -r -f '+output) # TODO jako opcja
 		cmd = "hadoop jar /opt/cloudera/parcels/CDH/jars/hadoop-streaming-2.6.0-mr1-cdh5.10.1.jar" # TODO jako zmienna
-		# TODO sum,min,max reducers ???
+		# GENERIC OPTIONS
+		if mcnt is not None:
+			cmd += ' -D mapred.map.tasks='+str(mcnt)
 		if m: # MAPPER
 			if callable(m):
 				m_py = self.tmp(get_fun_body(m), suffix='.py')
 				cmd += ' -file {0} -mapper {0}'.format(m_py)
 				self.cmd('chmod u+x '+m_py)
 			else:
-				cmd += ' -mapper {0}'.format(m)
+				cmd += """ -mapper '{0}'""".format(m)
 		if r: # REDUCER
 			if callable(r):
 				r_py = self.tmp(get_fun_body(r), suffix='.py')
 				cmd += ' -file {0} -reducer {0}'.format(r_py)
 				self.cmd('chmod u+x '+r_py)
 			else:
-				cmd += ' -reducer {0}'.format(r)
+				cmd += """ -reducer '{0}'""".format(r)
 		if c: # COMBINER
 			if callable(c):
 				c_py = self.tmp(get_fun_body(c), suffix='.py')
 				cmd += ' -file {0} -combiner {0}'.format(c_py)
 				self.cmd('chmod u+x '+c_py)
 			else:
-				cmd += ' -combiner {0}'.format(c)
+				cmd += """ -combiner '{0}'""".format(c)
 		# INPUT
 		if type(input) in (str,unicode):
 			cmd += ' -input '+input
@@ -232,6 +235,11 @@ class hadoop(unix):
 				cmd += ' -input '+x
 		# OUTPUT
 		cmd += ' -output '+output
+		# OTHER
+		if rcnt is not None:
+			cmd += ' -numReduceTasks '+str(rcnt)
+		if verbose:
+			cmd += ' -verbose'
 		self.cmd(cmd)
 
 # --- helpers ------------------------------------------------------------------
