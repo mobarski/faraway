@@ -2,16 +2,6 @@ import subprocess
 import tempfile
 import textwrap
 
-# TODO: przepisac TODO do gita
-# TODO: atomic copy -> filename.partial renamed to filename at the end
-# TODO: load partition
-# TODO: load przez kopiowanie danych
-# TODO: pobranie wartosci z wyniku SQLa do zmiennych
-# TODO: testy automatyczne
-# TODO: przyklady
-# TODO: execute przyjmuje str/unicode jako stdin
-# TODO: pobieranie metadanych
-
 class unix:
 	"unix host"
 	def __init__(self, host='', ssh='ssh', scp='scp'):
