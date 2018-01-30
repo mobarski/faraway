@@ -131,7 +131,8 @@ class hadoop(unix):
 		
 	def pipe_into_hdfs(self, pipe_cmd, hdfs_path, stdin=None):
 		self.run()
-		self.execute('hdfs dfs -put - {0}'.format(hdfs_path), before=pipe_cmd+' | ', stdin=stdin)
+		before = '' if not pipe_cmd else pipe_cmd+' | '
+		self.execute('hdfs dfs -put - {0}'.format(hdfs_path), before=before, stdin=stdin)
 
 	def load(self, path, table, columns, sep=r'\t', clean=True):
 		# TODO zalozenie tabeli w konkretnym miejsu i upload partycji???
