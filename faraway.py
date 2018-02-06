@@ -121,20 +121,24 @@ class hadoop(unix):
 		self.run()
 		self.execute('"hdfs dfs -text {0}/[^.]*" >{1}'.format(hdfs_path, local_path))
 		
-	def upload_into_hdfs(self, local_path, hdfs_path):
+	def upload_into_hdfs(self, local_path, hdfs_path, replicate=False):
+		# TODO force jako opcja
 		self.run()
-		self.execute('hdfs dfs -put - {0}'.format(hdfs_path), stdin=open(local_path,'r'))
+		aux = '' if replicate else '-l'
+		self.execute('hdfs dfs -put -f {1} - {0}'.format(hdfs_path,aux), stdin=open(local_path,'rb'))
 
 	def pipe_from_hdfs(self, pipe_cmd, hdfs_path):
 		self.run()
 		self.execute('"hdfs dfs -text {0}/[^.]*" | {1}'.format(hdfs_path, pipe_cmd))
 		
-	def pipe_into_hdfs(self, pipe_cmd, hdfs_path, stdin=None):
+	def pipe_into_hdfs(self, pipe_cmd, hdfs_path, stdin=None, replicate=False):
+		# TODO force jako opcja
 		self.run()
+		aux = '' if replicate else '-l'
 		before = '' if not pipe_cmd else pipe_cmd+' | '
-		self.execute('hdfs dfs -put - {0}'.format(hdfs_path), before=before, stdin=stdin)
+		self.execute('hdfs dfs -put -f {1} - {0}'.format(hdfs_path,aux), before=before, stdin=stdin)
 
-	def load(self, path, table, columns, sep=r'\t', clean=True):
+	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':', clean=True, replicate=False):
 		# TODO zalozenie tabeli w konkretnym miejsu i upload partycji???
 		# TODO elegancka obsluga columns???
 		# TODO table comment???
@@ -142,12 +146,15 @@ class hadoop(unix):
 		hdfs_path = '{}/{}'.format(self.var['hdfs_tmp_dir'],name)
 		
 		self.cmd('hdfs dfs -rm -r -f '+hdfs_path).run() # TODO jako opcja?
-		self.upload_into_hdfs(path, hdfs_path)
+		self.upload_into_hdfs(path, hdfs_path, replicate=replicate) # TODO pipe_into_hdfs bedzie szybsze ale tylko LIN?
 		script = """
 			DROP TABLE if exists {table};
 			CREATE TABLE {table}
 				({columns})
-				ROW FORMAT delimited fields terminated by '{sep}'
+				ROW FORMAT delimited
+				FIELDS terminated by '{sep}'
+				COLLECTION ITEMS terminated by '{csep}'
+				MAP KEYS terminated by '{ksep}'
 				;
 			LOAD DATA
 				INPATH '{hdfs_path}'
