@@ -14,6 +14,20 @@ cmd = h.dump('select * from dwh.dim_customers',header=True)
 run(cmd,out='customers.tsv')
 ```
 
+## Configuration
+
+TODO
+
+## Examples
+
+Example:
+```
+from faraway import hadoop,run
+h = hadoop()
+cmd = h.dump('select * from dwh.dim_customers',header=True)
+run(cmd,out='customers.tsv')
+```
+
 Example:
 ```
 from faraway import hadoop,run
