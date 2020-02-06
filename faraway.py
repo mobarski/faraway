@@ -1,153 +1,172 @@
-import subprocess
-import tempfile
-import textwrap
+# Copyright (c) 2020 Maciej Obarski
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
-class unix:
-	"unix host"
-	def __init__(self, host='', ssh='ssh', scp='scp'):
-		self.host = host
-		self.ssh = ssh
-		self.scp = scp
-		self.var = {'host':host,'tmp_dir':'/tmp'}
-		self.script = []
-		self.after  = []
-	
-	def __enter__(self):
-		return self
-	
-	def __exit__(self,et,ev,tb):
-		#self.run() # TODO handle exceptions and ALWAYS run self.clean()
-		self.clean()
-	
-	def clean(self):
-		"remove temporary files"
-		if self.after:
-			after = self.get_after()
-			print(after)
-			out = self.execute_script(after)
-			self.after = []
-	
-	def set(self, var_name, value):
-		"set variable value"
-		self.var[var_name] = value.format(**self.var)
-		return self
-	
-	def get(self, var_name):
-		"get variable value or None if var doesnt exists"
-		return self.var.get(var_name)
-	
-	def tmp(self, text='', var='', eof='EOF', prefix='{tmp_dir}', suffix='', dedent=True, clean=True):
-		"create temporary file and store its path in a variable"
-		if dedent:
-			text = textwrap.dedent(text).strip()
-		path = prefix +'/'+ random_name(self.host, text, var) + suffix
-		path = path.format(**self.var)
-		if var:
-			self.var[var] = path
-		if text:
-			self.script += ['cat >{0} <<{2}\n{1}\n{2}'.format(path,text.format(**self.var),eof)]
-		else:
-			self.script += ['touch '+path]
-		if clean:
-			self.after += ['rm '+path]
-		return path
-	
-	def cmd(self, text):
-		"add command to the main script"
-		self.script += [text.format(**self.var)]
-		return self
+# version: 0.5
 
-	def download(self, local_path, remote_path): # czy odwrotnie argumenty?
-		"download file from host"
-		self.run()
-		cmd = '{0} {1}:{2} {3}'.format(self.scp, self.host, remote_path.format(**self.var), local_path.format(**self.var))
-		print(cmd)
-		out = subprocess.check_call(cmd, shell=True) # TODO check_call czy check_output
-		return out
-	
-	def upload(self, local_path, remote_path): # czy odwrotnie argumenty?
-		"upload file to host"
-		cmd = '{0} {3} {1}:{2}'.format(self.scp, self.host, remote_path.format(**self.var), local_path.format(**self.var))
-		print(cmd)
-		out = subprocess.check_call(cmd, shell=True) # TODO check_call czy check_output
-		return out
+import os
+import json
+from tempfile import TemporaryFile
 
-	def run(self):
-		"run main script"
-		if self.script:
-			script = self.get_script()
-			print(script)
-			out = self.execute_script(script)
-		else:
-			out = None
-		self.script = []
-		return out
+# TODO render na plikach json? {bin}{ssh}
 
-	def get_script(self):
-		return '\n'.join(self.script) + '\nexit\n'
+DEFAULTS = {
+	'ssh':'ssh',
+	'cat':'cat',
+	'beeline':'beeline',
+	'hdfs_load_dir':'/tmp',
+	'hdfs_tmp_dir':'/tmp',
+	'tmp_dir':'/tmp',
+	'cfg':'faraway.json'
+}
 
-	def get_after(self):
-		return '\n'.join(self.after) + '\nexit\n'
+class Host:
 
-	def execute_script(self, text):
-		"immediate execution of commands passed via stdin to ssh"
-		cmd = self.ssh+' '+self.host
-		with tempfile.TemporaryFile() as f:
-			f.write(text)
-			f.seek(0)
-			out = subprocess.check_call(cmd, stdin=f, shell=True) # TODO check_call czy check_output
-		return out
 
-	def execute(self, cmd, stdin=None, before=''):
-		"immediate execution of command passed via args to ssh"
-		full_cmd = before + self.ssh +' '+ self.host +' '+ cmd
-		full_cmd = full_cmd.format(**self.var)
-		# TODO if type(stdin) is str: tempfile
-		print(full_cmd)
-		out = subprocess.check_call(full_cmd, stdin=stdin, shell=True)
-		return out
-
-# ------------------------------------------------------------------------------
-
-class hadoop(unix):
-	"hadoop host"
-	
-	def __init__(self, host='', ssh='ssh', scp='scp'):
-		unix.__init__(self, host, ssh, scp)
-		self.var['hive'] = 'hive'
-		self.var['hdfs_tmp_dir'] = '/tmp'
-
-	def download_from_hdfs(self, local_path, hdfs_path):
-		self.run()
-		self.execute('"hdfs dfs -text {0}/[^.]*" >{1}'.format(hdfs_path, local_path))
+	def __init__(self, **kwargs):
+		vars = {}
+		vars.update(DEFAULTS)
+		vars.update(kwargs)
 		
-	def upload_into_hdfs(self, local_path, hdfs_path, replicate=False):
-		# TODO force jako opcja
-		self.run()
-		aux = '' if replicate else '-l'
-		self.execute('hdfs dfs -put -f {1} - {0}'.format(hdfs_path,aux), stdin=open(local_path,'rb'))
-
-	def pipe_from_hdfs(self, pipe_cmd, hdfs_path):
-		self.run()
-		self.execute('"hdfs dfs -text {0}/[^.]*" | {1}'.format(hdfs_path, pipe_cmd))
+		# CONFIG FILES
+		for cfg_path in ['~/.faraway/config.json',vars['cfg']]:
+			cfg_path = os.path.expanduser(cfg_path)
+			if os.path.exists(cfg_path):
+				cfg = json.load(open(cfg_path))
+				# DEFAULTS
+				vars.update(cfg)
+				# TAGS
+				if 'tags' in vars:
+					for tag in vars['tags']:
+						if tag in cfg:
+							vars.update(cfg[tag])
+				# NAME
+				if 'name' in vars and vars['name'] in cfg:
+					vars.update(cfg[vars['name']])
 		
-	def pipe_into_hdfs(self, pipe_cmd, hdfs_path, stdin=None, replicate=False):
-		# TODO force jako opcja
-		self.run()
-		aux = '' if replicate else '-l'
-		before = '' if not pipe_cmd else pipe_cmd+' | '
-		self.execute('hdfs dfs -put -f {1} - {0}'.format(hdfs_path,aux), before=before, stdin=stdin)
+		# ENV VARIABLES
+		for k,v in os.environ.items():
+			if k.lower().startswith('faraway_'):
+				name = k[len('faraway_'):]
+				vars[name] = v
+		#
+		self.vars = vars
 
-	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':', clean=True, replicate=False):
-		# TODO zalozenie tabeli w konkretnym miejsu i upload partycji???
-		# TODO elegancka obsluga columns???
-		# TODO table comment???
-		name = random_name(self.host, path+' '+table, 'import')
-		hdfs_path = '{}/{}'.format(self.var['hdfs_tmp_dir'],name)
+	
+	# TODO ??? wybor czy env,plik itp sa przed czy po ARGUMENTS np FARAWAY_ vs faraway_
+	def render(self, text, *dicts):
+		vars = self.vars.copy()
+		# ARGUMENTS
+		for d in dicts:
+			vars.update(d)
+		# RENDER
+		output = text.format(**vars)
 		
-		self.cmd('hdfs dfs -rm -r -f '+hdfs_path).run() # TODO jako opcja?
-		self.upload_into_hdfs(path, hdfs_path, replicate=replicate) # TODO pipe_into_hdfs bedzie szybsze ale tylko LIN?
+		# VARIABLES STILL IN TEXT
+		if re.findall('\{\w+\}',output):
+			output = self.render(output,*dicts)
+		
+		return output
+
+
+
+class hadoop(Host):
+
+	# --- SHOW -----------------------------------------------------------------
+
+	# https://cwiki.apache.org/confluence/display/Hive/HiveServer2+Clients#HiveServer2Clients-Beeline%E2%80%93CommandLineShell
+	
+	# TODO ??? kompresja ssh
+	# INFO wydajnosc vs tworzenie pliku i pobranie z hdfs:
+	#      show:   6s  dump:  48s  na:  1K rekordow ~ 52KB
+	#      show:  65s  dump:  72s  na:  1M rekordow ~ 52MB
+	#      show: 590s  dump: 110s  na: 10M rekordow ~ 523MB
+	
+	def show(self, sql, format='tsv2', header=False, raw=False, no_col_prefix=True):
+				
+		# HEADER
+		header_str = '--showHeader=' + ('true' if header else 'false')
+				
+		# OUTPUT FORMAT
+		format_str = '--outputformat='+format
+		
+		# QUERY
+		if no_col_prefix:
+			sql = 'set hive.resultset.use.unique.column.names=false; '+sql
+		sql = sql.replace('"',r'\\"')
+		query_str = self.render('-e "{sql}"',locals())
+		
+		# SCRIPT
+		script = '{beeline} {header_str} {format_str} {query_str}'
+		if not raw:
+			internal = self.render(script,locals()).replace('"',r'\"')
+			script = '{ssh} "{internal}"'
+			
+		# CMD
+		cmd = self.render(script,locals())
+		return cmd
+
+
+	# --- DUMP -----------------------------------------------------------------
+	
+	def dump(self, sql, sep=r'\t', csep=',', ksep=':', header=False):
+		tmp_name = random_name() # TODO prefix as option
+		hdfs_path = '{hdfs_tmp_dir}/{tmp_name}'
+		sql_path = '{tmp_dir}/{tmp_name}.sql'
 		script = """
+				insert overwrite directory '{hdfs_path}'
+					row format delimited
+					fields terminated by '{sep}'
+					collection items terminated by '{csep}'
+					map keys terminated by '{ksep}'
+					stored as textfile
+					
+					{sql}
+					;
+				"""
+		script = self.render(dedent(script),locals())
+		
+		# SQL
+		cmd1 = "cat >{sql_path}; {beeline} -f {sql_path}; rm {sql_path}"
+		cmd2 = self.render(cmd1,locals()).replace('"',r'\"')
+		cmd = '{ssh} "{cmd2}"'
+		cmd = self.render(cmd, locals())
+		run(cmd, input=script)
+		
+		if header:
+			header_sql = re.sub(r'(?i)\blimit\s+\d+','',sql)
+			header_sql += ' limit 0'
+			header_cmd = self.show(header_sql,raw=True,header=True).replace('"',r'\"') # TODO separator
+			cmd = '{ssh} "{header_cmd}; hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}"'
+		else:
+			cmd = '{ssh} "hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}"'
+		return self.render(cmd, locals())
+	
+	# --- LOAD -----------------------------------------------------------------
+
+	# TODO replicaton factor
+	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':'):
+		cmd = '{cat} {path} | {ssh} "{hdfs_put_cmd}; {sql_cmd}; {hdfs_rm_cmd}"'
+		tmp_hdfs_path = '{hdfs_load_dir}/{table}'
+		hdfs_put_cmd = 'hdfs dfs -put -f - {tmp_hdfs_path}'
+		hdfs_rm_cmd  = 'hdfs dfs -rm -r -f {tmp_hdfs_path}'
+		sql = """
 			DROP TABLE if exists {table};
 			CREATE TABLE {table}
 				({columns})
@@ -157,123 +176,175 @@ class hadoop(unix):
 				MAP KEYS terminated by '{ksep}'
 				;
 			LOAD DATA
-				INPATH '{hdfs_path}'
+				INPATH '{tmp_hdfs_path}'
 				OVERWRITE INTO TABLE {table}
 				;
-			
-		""".format(**locals())
-		path = self.tmp(script, suffix='.sql')
-		self.cmd('{hive} -f '+path)
-		if clean:
-			self.after += ['hdfs dfs -rm -r -f '+hdfs_path]
-		self.run()
+		"""
+		sql = as_one_line(sql)
+		sql = self.render(sql,locals())
+		sql_cmd = self.show(sql,raw=True).replace('"',r'\"')
+		return self.render(cmd,locals())
+
+
+	# --- SQL ------------------------------------------------------------------
 	
-	def extract(self, path, sql, sep=r'\t', csep=',', ksep=':', clean=True):
-		name = random_name(self.host,sql,'extract')
-		hdfs_path = '{}/{}'.format(self.var['hdfs_tmp_dir'],name)
+	def sql(self, sql, no_col_prefix=True):
+		if no_col_prefix:
+			sql = 'set hive.resultset.use.unique.column.names=false;\n'+sql
+		sql = self.render(sql)
+		cmd = self.show('',format='table',header=True)
+		run(cmd, input=sql)
 		
-		#self.cmd('hdfs dfs -rm -r -f '+hdfs_path) # TODO jako opcja?
-		script = """
-		insert overwrite directory '{hdfs_path}'
-			row format delimited
-			fields terminated by '{sep}'
-			collection items terminated by '{csep}'
-			map keys terminated by '{ksep}'
-			stored as textfile
+	
+	# --- COLUMNS --------------------------------------------------------------
+	
+	def columns(self, table):
+		cmd = self.show('describe '+table)
+		raw_meta = run(cmd,mode=3)
+		lines = raw_meta.split('\n') # py3 ERROR
+		out = []
+		for line in lines:
+			rec = line.split('\t')
+			if len(rec)<2:
+				continue
+			out += ['{} {}'.format(rec[0],rec[1])]
+		return ', '.join(out)
+
+
+	# --- META -----------------------------------------------------------------
+	
+	def meta(self, table):
+		cmd = self.show('show create table '+table)
+		raw_meta = run(cmd,mode=3)
+		meta = {}
+		
+		meta['create_table'] = raw_meta
+		
+		# properties
+		for (k,v) in re.findall("'([^']+)'='([^']+)'",raw_meta): # py3 ERROR
+			if v.isdigit():
+				v=int(v)
+			meta[k]=v
 			
-			{sql}
-			;
-		""".format(**locals())
-		sql_path = self.tmp(script, suffix='.sql')
-		self.cmd('{hive} -f '+sql_path)
-		if clean:
-			self.after += ['hdfs dfs -rm -r -f '+hdfs_path]
-		self.download_from_hdfs(path,hdfs_path)
-	
-	def transform(self, sql):
-		sql_path = self.tmp(sql, suffix='.sql')
-		self.cmd('{hive} -f '+sql_path)
-	
-	def mapred(self, m=None, r=None, c=None, input=None, output=None, mcnt=None, rcnt=None, verbose=False):
-		# TODO tekst - kod pythona jako m,r,c
-		# TODO sum,min,max reducers ???
-		self.cmd('hdfs dfs -rm -r -f '+output) # TODO jako opcja
-		cmd = "hadoop jar /opt/cloudera/parcels/CDH/jars/hadoop-streaming-2.6.0-mr1-cdh5.10.1.jar" # TODO jako zmienna
-		# GENERIC OPTIONS
-		if mcnt is not None:
-			cmd += ' -D mapred.map.tasks='+str(mcnt)
-		if m: # MAPPER
-			if callable(m):
-				m_py = self.tmp(fun_to_script(m), suffix='.py')
-				cmd += ' -file {0} -mapper {0}'.format(m_py)
-				self.cmd('chmod u+x '+m_py)
-			else:
-				cmd += """ -mapper '{0}'""".format(m)
-		if r: # REDUCER
-			if callable(r):
-				r_py = self.tmp(fun_to_script(r), suffix='.py')
-				cmd += ' -file {0} -reducer {0}'.format(r_py)
-				self.cmd('chmod u+x '+r_py)
-			else:
-				cmd += """ -reducer '{0}'""".format(r)
-		if c: # COMBINER
-			if callable(c):
-				c_py = self.tmp(fun_to_script(c), suffix='.py')
-				cmd += ' -file {0} -combiner {0}'.format(c_py)
-				self.cmd('chmod u+x '+c_py)
-			else:
-				cmd += """ -combiner '{0}'""".format(c)
-		# INPUT
-		if type(input) in (str,unicode):
-			cmd += ' -input '+input
-		else:
-			for x in input:
-				cmd += ' -input '+x
-		# OUTPUT
-		cmd += ' -output '+output
-		# OTHER
-		if rcnt is not None:
-			cmd += ' -numReduceTasks '+str(rcnt)
-		if verbose:
-			cmd += ' -verbose'
-		self.cmd(cmd)
-
-# --- helpers ------------------------------------------------------------------
-
-def random_name(text='',text2='',label='',length=6,sep='-'):
-	import hashlib
-	import random
-	out = hashlib.sha1(text).hexdigest()[:length]
-	out += sep+hashlib.sha1(text2).hexdigest()[:length]
-	out += sep
-	for i in range(length):
-		out += random.choice('qwertyuiopasdfghjklzxcvbnm1234567890')
-	if label:
-		out += sep+label
-	return out
+		# location
+		loc=re.findall("'(hdfs://[^']+)'",raw_meta)
+		if loc:
+			meta['location'] = loc[0]
+		
+		return meta
 
 
-def fun_to_script(f,shebang=True):
-	import inspect
-	import textwrap
-	code = inspect.getsourcelines(f)
-	script = textwrap.dedent(''.join(code[0][1:]))
-	if shebang and not script.startswith('#!'):
-		script = '#!/usr/bin/env python\n'+script
-	return script
+# ---[ UTILITY ]----------------------------------------------------------------
+
+import subprocess as sp
+
+# TODO py3: return str vs bytes-like
+def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None):
+	script = cmd
+	if aux:
+		script = script + ' ' + aux
+	if out:
+		script = script + ' >' + out
+	if err:
+		script = script + ' 2>' + err
+	if aux2:
+		script = script + ' ' + aux2
+	if input:
+		f_in = TemporaryFile("w+")
+		f_in.write(input)
+		f_in.seek(0)
+	else:
+		f_in = None
+	#
+	print(script) # TODO echo method & argument
+	#
+	if mode==0:
+		pass
+	elif mode==1 or mode is None:
+		return sp.check_call(script, shell=True, stdin=f_in)
+	elif mode==2:
+		return sp.call(script, shell=True, stdin=f_in)
+	elif mode==3:
+		return sp.check_output(script, shell=True, stdin=f_in)
+	elif mode==4:
+		return sp.Popen(script, shell=True, stdin=f_in, stdout=sp.PIPE)
+	else:
+		raise Exception('Unsupported mode: {}'.format(mode))
 
 
-def columns(col_str,default='string',types_str='',sep1='\s+',sep2=':'):
-	import re
-	out = []
-	types = {}
-	for ts in re.split(sep1,types_str):
-		if not ts: continue
-		t,s = ts.split(sep2)[:2]
-		types[t]=s
-	for name_type in re.split(sep1,col_str):
-		name,t = (name_type+sep2).split(sep2)[:2]
-		t = types.get(t,default)
-		out += [(name,t)]
-	return ',  '.join([' '.join(c) for c in out])
+import re
 
+def as_one_line(text):
+	text = text.strip()
+	text = re.sub('\s+',' ',text)
+	return text
+
+from time import strftime
+from random import sample
+
+def random_name(prefix='faraway'):
+	rnd = ''.join(sample("qwertyuiopasdfghjklzxcvbnm",4))
+	return strftime(prefix+'_%Y%m%d_%H%M%S_'+rnd)
+
+# ---[ CLI ]--------------------------------------------------------------------
+
+import argparse
+from textwrap import dedent
+
+parser = argparse.ArgumentParser(add_help=False
+	,formatter_class=argparse.RawDescriptionHelpFormatter
+	,description="Remote Hadoop operations over ssh"
+	,epilog=dedent(
+		"""
+		Actions:
+		
+		* show query                  write query results to stdout (low latency)
+		* dump query                  write query results to stdout (high throughput)
+		* load path table columns     load data from local file into table
+		* sql                         execute sql script from standard input
+		* meta table                  fetch table metadata (show create results)
+		* vars                        show faraway variables
+		
+		Configuration:
+		
+		* faraway loads configuration from following .json files:
+		  - from user directory:
+		      C:\\Users\\my_user_name\\.faraway\\config.json   on Windows
+		      ~/.faraway/config.json                           on Linux
+		  - from current directory: ./faraway.py
+		  
+		* faraway reads environment variables prefixed with "faraway_",
+		  strips the prefix and uses them as faraway variables
+
+		Show vs Dump:
+		
+		* TODO
+
+		Examples:
+		
+		* faraway show -h "select * from stage.movies"
+		* faraway dump "select * from stage.movies" >movies.tsv
+		* faraway load -h movies.tsv stage.movies "id int, title string, year string"
+		* faraway meta stage.movies
+		* faraway sql <transform.sql
+		* echo "drop table if exists {env}.movies" | faraway_env=test faraway sql
+		* faraway vars -n my_conn
+		
+		  where faraway is an alias:
+		  - doskey faraway=python3 faraway.py $*    on Windows
+		  - alias faraway=python3 faraway.py        on Linux
+		"""
+		)
+	)
+parser.add_argument('--help',help='print help',action='help')
+parser.add_argument('-h','--header',help='include header',action='store_const',const=1)
+parser.add_argument('action',type=str,help='action',choices=['show','dump','load','sql','meta','vars'])
+parser.add_argument('-f',type=str,help='file format (as in beeline)',choices=['tsv2','csv2','dsv','table','vertical','xmlattr','xmlelements','tsv','csv'])
+parser.add_argument('args',help='action specific arguments (described below)')
+parser.add_argument('-n','--name',type=str,help='connection name')
+parser.add_argument('-t','--tags',type=str,help='connection tags (comma separated)')
+
+# ------------------------------------------------------------------------------
+
+if __name__=="__main__":
+	parser.parse_args()
