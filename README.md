@@ -18,6 +18,14 @@ run(cmd,out='customers.tsv')
 
 TODO
 
+## CLI
+
+TODO
+
+## API
+
+TODO
+
 ## Examples
 
 Example:
