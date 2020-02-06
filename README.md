@@ -10,14 +10,6 @@ Example:
 ```
 from faraway import hadoop,run
 h = hadoop()
-cmd = h.show('select * from dwh.dict_products limit 30',output='table')
-run(cmd)
-```
-
-Example:
-```
-from faraway import hadoop,run
-h = hadoop()
 cmd = h.dump('select * from dwh.dim_customers',header=True)
 run(cmd,out='customers.tsv')
 ```
@@ -27,6 +19,23 @@ Example:
 from faraway import hadoop,run
 h = hadoop()
 cmd = h.load('customers.tsv', 'stage.customers', 'id int, name string, email string', header=True)
+run(cmd)
+```
+
+Example:
+```
+from faraway import hadoop,run
+h = hadoop()
+my_script = open('my_script.sql').read()
+cmd = h.sql(my_script)
+run(cmd)
+```
+
+Example:
+```
+from faraway import hadoop,run
+h = hadoop()
+cmd = h.show('select * from dwh.dict_products limit 30',output='table')
 run(cmd)
 ```
 
