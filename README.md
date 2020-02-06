@@ -65,7 +65,7 @@ cmd = h.show('select * from dwh.dict_products limit 30',output='table')
 run(cmd)
 ```
 
-Print:
+Print first records fixing specific typo:
 ```
 from faraway import hadoop,run
 h = hadoop()
