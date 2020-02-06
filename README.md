@@ -32,7 +32,7 @@ TODO
 
 ## Examples
 
-Example:
+Dump table to tsv file:
 ```
 from faraway import hadoop,run
 h = hadoop()
@@ -40,7 +40,7 @@ cmd = h.dump('select * from dwh.dim_customers',header=True)
 run(cmd,out='customers.tsv')
 ```
 
-Example:
+Load tsv file as new table:
 ```
 from faraway import hadoop,run
 h = hadoop()
@@ -48,7 +48,7 @@ cmd = h.load('customers.tsv', 'stage.customers', 'id int, name string, email str
 run(cmd)
 ```
 
-Example:
+Execute data transformation script:
 ```
 from faraway import hadoop,run
 h = hadoop()
@@ -57,7 +57,7 @@ cmd = h.sql(my_script)
 run(cmd)
 ```
 
-Example:
+Show first rows as table:
 ```
 from faraway import hadoop,run
 h = hadoop()
@@ -65,12 +65,13 @@ cmd = h.show('select * from dwh.dict_products limit 30',output='table')
 run(cmd)
 ```
 
-Example:
+Print:
 ```
 from faraway import hadoop,run
 h = hadoop()
 cmd = h.show('select * from dwh.dict_products limit 30')
 proc = run(cmd,mode=4)
 for line in proc.stdout:
-	print('>>> '+line)
+	rec = line.replace('hamer','hammer').split('\t')
+	print(rec)
 ```
