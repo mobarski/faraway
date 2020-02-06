@@ -18,6 +18,24 @@ Example:
 ```
 from faraway import hadoop,run
 h = hadoop()
-cmd = h.dump('select * from dwh.dim_customers')
+cmd = h.dump('select * from dwh.dim_customers',header=True)
 run(cmd,out='customers.tsv')
+```
+
+Example:
+```
+from faraway import hadoop,run
+h = hadoop()
+cmd = h.load('customers.tsv', 'stage.customers', 'id int, name string, email string', header=True)
+run(cmd)
+```
+
+Example:
+```
+from faraway import hadoop,run
+h = hadoop()
+cmd = h.show('select * from dwh.dict_products limit 30',output='table')
+proc = run(cmd,mode=4)
+for line in proc.stdout:
+	print('>>> '+line)
 ```
