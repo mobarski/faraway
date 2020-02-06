@@ -14,17 +14,21 @@ cmd = h.dump('select * from dwh.dim_customers',header=True)
 run(cmd,out='customers.tsv')
 ```
 
-## Configuration
-
-TODO
 
 ## CLI
 
 TODO
 
+
 ## API
 
 TODO
+
+
+## Configuration
+
+TODO
+
 
 ## Examples
 
