@@ -18,7 +18,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# version: 0.6
+# version: 0.6.2
+
+# CORE ssh+beeline obudowane cli/api "dla ludzi"
+# CORE jeden plik ala bottle
+# CORE konfigurowalnosc pod docker
+# CORE jak najmniej boilerplate
+# CORE dziala na py2.7 i py3+
+# CORE dziala na windows i linux
+# CORE prosta instalacja (szczegolnie windows) i konfiguracja
 
 from __future__ import print_function
 import os
@@ -26,16 +34,21 @@ import sys
 import json
 from tempfile import TemporaryFile
 
-# CORE ssh+beeline obudowane cli/api "dla ludzi"
-
-# TODO h.load
-# TODO minimalizacja ilosci opcji
-#      - show -> sql
-#      - meta -> show
 # TODO silent vs verbose
+# TODO h.load
+# TODO minimalizacja ilosci opcji / uspojnienie
+#      - show -> sql (test z enterami w sqlu i outputem z cli hive) -> dzialaja ok i tu i tu -> mozna uproscic
+#      - meta -> show
+# TODO h.columns
+# TODO dlm
+# TODO sep,csep,ksep
+# TODO uzupelnic --help
+# TODO opcje domyslne w configu (sep,ksep,format,dlm itp)
 # TODO -- 0.7 release --
 # TODO test named connections
 # TODO test tags
+# TODO dokumentacja connections i tags
+# TODO -- 0.8 release --
 # TODO render na konfiguracyjnych plikach json? {bin}{ssh}
 
 DEFAULTS = {
@@ -110,7 +123,7 @@ class hadoop(Host):
 	#      show:  65s  dump:  72s  na:  1M rekordow ~ 52MB
 	#      show: 590s  dump: 110s  na: 10M rekordow ~ 523MB
 	
-	def show(self, sql, format='tsv2', header=False, raw=False, silent=False, no_col_prefix=True):
+	def show(self, sql, format='tsv2', header=False, raw=False, silent=False, verbose=False, no_col_prefix=True):
 				
 		# HEADER
 		header_str = '--showHeader=' + ('true' if header else 'false')
@@ -131,6 +144,8 @@ class hadoop(Host):
 		other = []
 		if silent:
 			other += ['--silent=true']
+		if verbose:
+			other += ['--verbose=true']
 		other_str = ' '.join(other)
 		
 		# SCRIPT
@@ -146,7 +161,7 @@ class hadoop(Host):
 
 	# --- DUMP -----------------------------------------------------------------
 	
-	def dump(self, sql, sep=r'\t', csep=',', ksep=':', silent=False, header=False):
+	def dump(self, sql, sep=r'\t', csep=',', ksep=':', silent=False, verbose=False, header=False):
 		tmp_name = random_name() # TODO prefix as option
 		hdfs_path = '{hdfs_tmp_dir}/{tmp_name}'
 		sql_path = '{tmp_dir}/{tmp_name}.sql'
@@ -167,6 +182,8 @@ class hadoop(Host):
 		other = []
 		if silent:
 			other += ['--silent=true']
+		if verbose:
+			other += ['--verbose=true']
 		other_str = ' '.join(other)
 
 		# SQL
@@ -188,7 +205,7 @@ class hadoop(Host):
 	# --- LOAD -----------------------------------------------------------------
 
 	# TODO replicaton factor
-	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':'):
+	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':',silent=False, verbose=False):
 		cmd = '{cat} {path} | {ssh} "{hdfs_put_cmd}; {sql_cmd}; {hdfs_rm_cmd}"'
 		tmp_hdfs_path = '{hdfs_load_dir}/{table}'
 		hdfs_put_cmd = 'hdfs dfs -put -f - {tmp_hdfs_path}'
@@ -372,10 +389,12 @@ parser = argparse.ArgumentParser(add_help=False
 parser.add_argument('--help',help='print help',action='help')
 parser.add_argument('-h','--header',help='include header',action='store_const',const=1)
 parser.add_argument('-s','--silent',help='silent beeline',action='store_const',const=1)
+parser.add_argument('-v','--verbose',help='verbose beeline',action='store_const',const=1)
 parser.add_argument('-e','--echo',help='echo commands',action='store_const',const=1)
 parser.add_argument('action',type=str,help='action',choices=['show','dump','load','sql','meta','vars'])
 parser.add_argument('-f',type=str,help='file format (as in beeline)',choices=['tsv2','csv2','dsv','table','vertical','xmlattr','xmlelements','tsv','csv'])
-parser.add_argument('args',help='action specific arguments (described below)')
+parser.add_argument('argv',help='action specific arguments (described below)',nargs='*')
+
 parser.add_argument('-n','--name',type=str,help='connection name')
 parser.add_argument('-t','--tags',type=str,help='connection tags (comma separated)')
 
@@ -387,29 +406,39 @@ if __name__=="__main__":
 	action = args.action
 	header = args.header==1
 	silent = args.silent==1
+	verbose = args.verbose==1
 	echo = args.echo==1
+	#
+	# TODO refactor
+	if action in ('show','dump','sql','meta') and len(args.argv)!=1:
+		print("Wrong number of arguments for action '{}'. Expected:1 got:{} {}".format(action, len(args.argv), args.argv), file=sys.stderr)
+		exit(1)
+	if action in ('vars') and len(args.argv)!=0:
+		print("Wrong number of arguments for action '{}'. Expected:0 got:{} {}".format(action, len(args.argv), args.argv), file=sys.stderr)
+		exit(1)
 	#
 	h = hadoop(cfg='tvn_faraway.json') # XXX
 	if action=='show':
-		sql = args.args
+		sql = args.argv[0]
 		if sql=='-': sql=sys.stdin.read().rstrip()
 		cmd = h.show(sql,header=header,silent=silent)
 		run(cmd,mode=1,echo=echo)
 	elif action=='dump':
-		sql = args.args
+		sql = args.argv[0]
 		if sql=='-': sql=sys.stdin.read().rstrip()
 		cmd = h.dump(sql,header=header,silent=silent)
 		run(cmd,mode=1,echo=echo)
 	elif action=='sql':
-		sql = args.args
+		sql = args.argv[0]
 		if sql=='-': sql=sys.stdin.read().rstrip()
 		h.sql(sql,echo=echo,silent=silent)
 	elif action=='load': # TODO # TODO # TODO # TODO # TODO # TODO # TODO
+		print(args.argv)
 		exit(1)
 	elif action=='meta':
-		table = args.args
+		table = args.argv[0]
 		meta = h.meta(table)
 		print(meta['create_table'].rstrip())
 	elif action=='vars':
 		for k,v in sorted(h.vars.items()):
-			print('{} = {}'.format(k,v)) # TODO pprint json
+			print('{} = {}'.format(k,v)) # TODO pprint json as option
