@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# version: 0.6.2
+# version: 0.6.3
 
 # CORE ssh+beeline obudowane cli/api "dla ludzi"
 # CORE jeden plik ala bottle
@@ -34,22 +34,25 @@ import sys
 import json
 from tempfile import TemporaryFile
 
-# TODO silent vs verbose
-# TODO h.load
+# TEST h.load
+# TEST silent vs verbose
+
+# TODO opcje do dlm,sep,csep,ksep
 # TODO minimalizacja ilosci opcji / uspojnienie
-#      - show -> sql (test z enterami w sqlu i outputem z cli hive) -> dzialaja ok i tu i tu -> mozna uproscic
-#      - meta -> show
-# TODO h.columns
-# TODO dlm
-# TODO sep,csep,ksep
+# TODO --version
 # TODO uzupelnic --help
-# TODO opcje domyslne w configu (sep,ksep,format,dlm itp)
 # TODO -- 0.7 release --
+
+# TODO opcje domyslne w configu (sep,ksep,format,dlm itp)
+# TODO rename name->connection / node / addr
 # TODO test named connections
 # TODO test tags
 # TODO dokumentacja connections i tags
+# TODO h.columns
 # TODO -- 0.8 release --
 # TODO render na konfiguracyjnych plikach json? {bin}{ssh}
+# TODO pip
+# TODO -- 0.9 release --
 
 DEFAULTS = {
 	'ssh':'ssh',
@@ -119,11 +122,11 @@ class hadoop(Host):
 	
 	# TODO ??? kompresja ssh
 	# INFO wydajnosc vs tworzenie pliku i pobranie z hdfs:
-	#      show:   6s  dump:  48s  na:  1K rekordow ~ 52KB
-	#      show:  65s  dump:  72s  na:  1M rekordow ~ 52MB
-	#      show: 590s  dump: 110s  na: 10M rekordow ~ 523MB
+	#      sql:   6s  dump:  48s  na:  1K rekordow ~ 52KB
+	#      sql:  65s  dump:  72s  na:  1M rekordow ~ 52MB
+	#      sql: 590s  dump: 110s  na: 10M rekordow ~ 523MB
 	
-	def show(self, sql, format='tsv2', header=False, raw=False, silent=False, verbose=False, no_col_prefix=True):
+	def sql(self, sql, format='tsv2', header=False, raw=False, silent=False, verbose=False, no_col_prefix=True):
 				
 		# HEADER
 		header_str = '--showHeader=' + ('true' if header else 'false')
@@ -204,9 +207,11 @@ class hadoop(Host):
 	
 	# --- LOAD -----------------------------------------------------------------
 
-	# TODO replicaton factor
+	# TODO replication factor
 	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':',silent=False, verbose=False):
-		cmd = '{cat} {path} | {ssh} "{hdfs_put_cmd}; {sql_cmd}; {hdfs_rm_cmd}"'
+		cmd = '{ssh} "{hdfs_put_cmd}; {sql_cmd}; {hdfs_rm_cmd}"'
+		if path not in ('-',''):
+			cmd = '{cat} {path} | '+cmd
 		tmp_hdfs_path = '{hdfs_load_dir}/{table}'
 		hdfs_put_cmd = 'hdfs dfs -put -f - {tmp_hdfs_path}'
 		hdfs_rm_cmd  = 'hdfs dfs -rm -r -f {tmp_hdfs_path}'
@@ -226,18 +231,8 @@ class hadoop(Host):
 		"""
 		sql = as_one_line(sql)
 		sql = self.render(sql,locals())
-		sql_cmd = self.show(sql,raw=True).replace('"',r'\"')
+		sql_cmd = self.show(sql, raw=True, silent=silent, verbose=verbose).replace('"',r'\"')
 		return self.render(cmd,locals())
-
-
-	# --- SQL ------------------------------------------------------------------
-	
-	def sql(self, sql, mode=1, echo=0, silent=0, no_col_prefix=True):
-		if no_col_prefix:
-			sql = 'set hive.resultset.use.unique.column.names=false; '+sql
-		sql = self.render(sql)+'\n'
-		cmd = self.show('',format='table',header=True,silent=silent)
-		return run(cmd, input=sql, mode=mode, echo=echo)
 		
 	
 	# --- COLUMNS --------------------------------------------------------------
@@ -294,7 +289,13 @@ def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None, ech
 		script = script + ' 2>' + err
 	if aux2:
 		script = script + ' ' + aux2
-	if input:
+
+	# input
+	if input==1:
+		f_in = sys.stdin
+	elif type(input)==file:
+		f_in = input
+	elif input:
 		f_in = TemporaryFile("w+")
 		f_in.write(input)
 		f_in.seek(0)
@@ -305,6 +306,7 @@ def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None, ech
 		print('\nINPUT:',file=sys.stderr)
 		print(input,file=sys.stderr)
 		print('',file=sys.stderr)
+		
 	# execute
 	if mode==0:
 		pass
@@ -346,11 +348,9 @@ parser = argparse.ArgumentParser(add_help=False
 		"""
 		Actions:
 		
-		* show query                  write query results to stdout (low latency)
-		* dump query                  write query results to stdout (high throughput)
+		* sql script                  write sql script results to stdout (low latency)
+		* dump query                  write single sql query results to stdout (high throughput)
 		* load path table columns     load data from local file into table
-		* sql                         execute sql script from standard input
-		* meta table                  fetch table metadata (show create results)
 		* vars                        show faraway variables
 		
 		Configuration:
@@ -364,19 +364,19 @@ parser = argparse.ArgumentParser(add_help=False
 		* faraway reads environment variables prefixed with "faraway_",
 		  strips the prefix and uses them as faraway variables
 
-		Show vs Dump:
+		Actions - sql vs dump:
 		
 		* TODO
 
 		Examples:
 		
-		* faraway show -h "select * from stage.movies"
+		* faraway sql -h "select * from stage.movies"
 		* faraway dump "select * from stage.movies" >movies.tsv
 		* faraway load -h movies.tsv stage.movies "id int, title string, year string"
-		* faraway meta stage.movies
 		* faraway sql - <transform.sql
+		* faraway sql -s "show create table stage.movies"
 		* echo "drop table if exists {env}.movies" | faraway_env=test faraway sql
-		* echo "select * from stage.movies" | faraway show -h -
+		* echo "select * from stage.movies" | faraway sql -h -
 		* echo "select * from stage.movies" | faraway dump -h - >movies.tsv
 		* faraway vars -n my_conn
 		
@@ -391,7 +391,7 @@ parser.add_argument('-h','--header',help='include header',action='store_const',c
 parser.add_argument('-s','--silent',help='silent beeline',action='store_const',const=1)
 parser.add_argument('-v','--verbose',help='verbose beeline',action='store_const',const=1)
 parser.add_argument('-e','--echo',help='echo commands',action='store_const',const=1)
-parser.add_argument('action',type=str,help='action',choices=['show','dump','load','sql','meta','vars'])
+parser.add_argument('action',type=str,help='action',choices=['sql','dump','load','vars'])
 parser.add_argument('-f',type=str,help='file format (as in beeline)',choices=['tsv2','csv2','dsv','table','vertical','xmlattr','xmlelements','tsv','csv'])
 parser.add_argument('argv',help='action specific arguments (described below)',nargs='*')
 
@@ -402,43 +402,48 @@ parser.add_argument('-t','--tags',type=str,help='connection tags (comma separate
 
 if __name__=="__main__":
 	
+	# FARAWAY CLI
 	args = parser.parse_args()
 	action = args.action
+	argv = args.argv
 	header = args.header==1
 	silent = args.silent==1
 	verbose = args.verbose==1
 	echo = args.echo==1
-	#
-	# TODO refactor
-	if action in ('show','dump','sql','meta') and len(args.argv)!=1:
-		print("Wrong number of arguments for action '{}'. Expected:1 got:{} {}".format(action, len(args.argv), args.argv), file=sys.stderr)
-		exit(1)
-	if action in ('vars') and len(args.argv)!=0:
-		print("Wrong number of arguments for action '{}'. Expected:0 got:{} {}".format(action, len(args.argv), args.argv), file=sys.stderr)
-		exit(1)
-	#
+
+	# assert arguments count
+	for a,n in dict(sql=1,dump=1,vars=0,load=3).items():
+		if action==a and len(argv)!=n:
+			print("Wrong number of arguments for action '{}'. Expected:{} got:{} {}".format(action, n, len(argv), argv), file=sys.stderr)
+			exit(1)
+	
 	h = hadoop(cfg='tvn_faraway.json') # XXX
-	if action=='show':
-		sql = args.argv[0]
+	
+	# SQL
+	if action=='sql':
+		sql = argv[0]
 		if sql=='-': sql=sys.stdin.read().rstrip()
-		cmd = h.show(sql,header=header,silent=silent)
+		cmd = h.sql(sql,header=header,silent=silent,verbose=verbose)
 		run(cmd,mode=1,echo=echo)
+	
+	# DUMP
 	elif action=='dump':
-		sql = args.argv[0]
+		sql = argv[0]
 		if sql=='-': sql=sys.stdin.read().rstrip()
-		cmd = h.dump(sql,header=header,silent=silent)
+		cmd = h.dump(sql,header=header,silent=silent,verbose=verbose)
 		run(cmd,mode=1,echo=echo)
-	elif action=='sql':
-		sql = args.argv[0]
-		if sql=='-': sql=sys.stdin.read().rstrip()
-		h.sql(sql,echo=echo,silent=silent)
-	elif action=='load': # TODO # TODO # TODO # TODO # TODO # TODO # TODO
-		print(args.argv)
-		exit(1)
-	elif action=='meta':
-		table = args.argv[0]
-		meta = h.meta(table)
-		print(meta['create_table'].rstrip())
+	
+	# LOAD	
+	elif action=='load':
+		path = argv[0]
+		table = argv[1]
+		columns = argv[2]
+		# TODO header
+		cmd = h.load(path,table,columns)
+		run(cmd, input=sys.stdin if path=='-' else None)
+	
+	# VARS
 	elif action=='vars':
 		for k,v in sorted(h.vars.items()):
 			print('{} = {}'.format(k,v)) # TODO pprint json as option
+
