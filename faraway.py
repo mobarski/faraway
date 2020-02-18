@@ -18,13 +18,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# version: 0.5
+# version: 0.6
 
+from __future__ import print_function
 import os
+import sys
 import json
 from tempfile import TemporaryFile
 
-# TODO render na plikach json? {bin}{ssh}
+# CORE ssh+beeline obudowane cli/api "dla ludzi"
+
+# TODO h.load
+# TODO minimalizacja ilosci opcji
+#      - show -> sql
+#      - meta -> show
+# TODO silent vs verbose
+# TODO -- 0.7 release --
+# TODO test named connections
+# TODO test tags
+# TODO render na konfiguracyjnych plikach json? {bin}{ssh}
 
 DEFAULTS = {
 	'ssh':'ssh',
@@ -98,7 +110,7 @@ class hadoop(Host):
 	#      show:  65s  dump:  72s  na:  1M rekordow ~ 52MB
 	#      show: 590s  dump: 110s  na: 10M rekordow ~ 523MB
 	
-	def show(self, sql, format='tsv2', header=False, raw=False, no_col_prefix=True):
+	def show(self, sql, format='tsv2', header=False, raw=False, silent=False, no_col_prefix=True):
 				
 		# HEADER
 		header_str = '--showHeader=' + ('true' if header else 'false')
@@ -107,13 +119,22 @@ class hadoop(Host):
 		format_str = '--outputformat='+format
 		
 		# QUERY
-		if no_col_prefix:
-			sql = 'set hive.resultset.use.unique.column.names=false; '+sql
-		sql = sql.replace('"',r'\\"')
-		query_str = self.render('-e "{sql}"',locals())
+		if sql:
+			if no_col_prefix:
+				sql = 'set hive.resultset.use.unique.column.names=false; '+sql
+			sql = sql.replace('"',r'\\"')
+			query_str = self.render('-e "{sql}"',locals())
+		else:
+			query_str = ''
+		
+		# OTHER
+		other = []
+		if silent:
+			other += ['--silent=true']
+		other_str = ' '.join(other)
 		
 		# SCRIPT
-		script = '{beeline} {header_str} {format_str} {query_str}'
+		script = '{beeline} {other_str} {header_str} {format_str} {query_str}'
 		if not raw:
 			internal = self.render(script,locals()).replace('"',r'\"')
 			script = '{ssh} "{internal}"'
@@ -125,7 +146,7 @@ class hadoop(Host):
 
 	# --- DUMP -----------------------------------------------------------------
 	
-	def dump(self, sql, sep=r'\t', csep=',', ksep=':', header=False):
+	def dump(self, sql, sep=r'\t', csep=',', ksep=':', silent=False, header=False):
 		tmp_name = random_name() # TODO prefix as option
 		hdfs_path = '{hdfs_tmp_dir}/{tmp_name}'
 		sql_path = '{tmp_dir}/{tmp_name}.sql'
@@ -141,18 +162,24 @@ class hadoop(Host):
 					;
 				"""
 		script = self.render(dedent(script),locals())
-		
+
+		# OTHER
+		other = []
+		if silent:
+			other += ['--silent=true']
+		other_str = ' '.join(other)
+
 		# SQL
-		cmd1 = "cat >{sql_path}; {beeline} -f {sql_path}; rm {sql_path}"
+		cmd1 = "cat >{sql_path}; {beeline} {other_str} -f {sql_path}; rm {sql_path}"
 		cmd2 = self.render(cmd1,locals()).replace('"',r'\"')
 		cmd = '{ssh} "{cmd2}"'
 		cmd = self.render(cmd, locals())
-		run(cmd, input=script)
+		run(cmd, input=script, out='&2')
 		
 		if header:
 			header_sql = re.sub(r'(?i)\blimit\s+\d+','',sql)
 			header_sql += ' limit 0'
-			header_cmd = self.show(header_sql,raw=True,header=True).replace('"',r'\"') # TODO separator
+			header_cmd = self.show(header_sql,raw=True,header=True,silent=silent).replace('"',r'\"') # TODO separator
 			cmd = '{ssh} "{header_cmd}; hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}"'
 		else:
 			cmd = '{ssh} "hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}"'
@@ -188,12 +215,12 @@ class hadoop(Host):
 
 	# --- SQL ------------------------------------------------------------------
 	
-	def sql(self, sql, no_col_prefix=True):
+	def sql(self, sql, mode=1, echo=0, silent=0, no_col_prefix=True):
 		if no_col_prefix:
-			sql = 'set hive.resultset.use.unique.column.names=false;\n'+sql
-		sql = self.render(sql)
-		cmd = self.show('',format='table',header=True)
-		run(cmd, input=sql)
+			sql = 'set hive.resultset.use.unique.column.names=false; '+sql
+		sql = self.render(sql)+'\n'
+		cmd = self.show('',format='table',header=True,silent=silent)
+		return run(cmd, input=sql, mode=mode, echo=echo)
 		
 	
 	# --- COLUMNS --------------------------------------------------------------
@@ -214,7 +241,7 @@ class hadoop(Host):
 	# --- META -----------------------------------------------------------------
 	
 	def meta(self, table):
-		cmd = self.show('show create table '+table)
+		cmd = self.show('show create table '+table,silent=True) # XXX silent=silent
 		raw_meta = run(cmd,mode=3)
 		meta = {}
 		
@@ -236,10 +263,11 @@ class hadoop(Host):
 
 # ---[ UTILITY ]----------------------------------------------------------------
 
+import sys
 import subprocess as sp
 
 # TODO py3: return str vs bytes-like
-def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None):
+def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None, echo=False):
 	script = cmd
 	if aux:
 		script = script + ' ' + aux
@@ -255,9 +283,12 @@ def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None):
 		f_in.seek(0)
 	else:
 		f_in = None
-	#
-	print(script) # TODO echo method & argument
-	#
+	if echo:
+		print('\nCMD:',script,file=sys.stderr)
+		print('\nINPUT:',file=sys.stderr)
+		print(input,file=sys.stderr)
+		print('',file=sys.stderr)
+	# execute
 	if mode==0:
 		pass
 	elif mode==1 or mode is None:
@@ -326,8 +357,10 @@ parser = argparse.ArgumentParser(add_help=False
 		* faraway dump "select * from stage.movies" >movies.tsv
 		* faraway load -h movies.tsv stage.movies "id int, title string, year string"
 		* faraway meta stage.movies
-		* faraway sql <transform.sql
+		* faraway sql - <transform.sql
 		* echo "drop table if exists {env}.movies" | faraway_env=test faraway sql
+		* echo "select * from stage.movies" | faraway show -h -
+		* echo "select * from stage.movies" | faraway dump -h - >movies.tsv
 		* faraway vars -n my_conn
 		
 		  where faraway is an alias:
@@ -338,6 +371,8 @@ parser = argparse.ArgumentParser(add_help=False
 	)
 parser.add_argument('--help',help='print help',action='help')
 parser.add_argument('-h','--header',help='include header',action='store_const',const=1)
+parser.add_argument('-s','--silent',help='silent beeline',action='store_const',const=1)
+parser.add_argument('-e','--echo',help='echo commands',action='store_const',const=1)
 parser.add_argument('action',type=str,help='action',choices=['show','dump','load','sql','meta','vars'])
 parser.add_argument('-f',type=str,help='file format (as in beeline)',choices=['tsv2','csv2','dsv','table','vertical','xmlattr','xmlelements','tsv','csv'])
 parser.add_argument('args',help='action specific arguments (described below)')
@@ -347,4 +382,34 @@ parser.add_argument('-t','--tags',type=str,help='connection tags (comma separate
 # ------------------------------------------------------------------------------
 
 if __name__=="__main__":
-	parser.parse_args()
+	
+	args = parser.parse_args()
+	action = args.action
+	header = args.header==1
+	silent = args.silent==1
+	echo = args.echo==1
+	#
+	h = hadoop(cfg='tvn_faraway.json') # XXX
+	if action=='show':
+		sql = args.args
+		if sql=='-': sql=sys.stdin.read().rstrip()
+		cmd = h.show(sql,header=header,silent=silent)
+		run(cmd,mode=1,echo=echo)
+	elif action=='dump':
+		sql = args.args
+		if sql=='-': sql=sys.stdin.read().rstrip()
+		cmd = h.dump(sql,header=header,silent=silent)
+		run(cmd,mode=1,echo=echo)
+	elif action=='sql':
+		sql = args.args
+		if sql=='-': sql=sys.stdin.read().rstrip()
+		h.sql(sql,echo=echo,silent=silent)
+	elif action=='load': # TODO # TODO # TODO # TODO # TODO # TODO # TODO
+		exit(1)
+	elif action=='meta':
+		table = args.args
+		meta = h.meta(table)
+		print(meta['create_table'].rstrip())
+	elif action=='vars':
+		for k,v in sorted(h.vars.items()):
+			print('{} = {}'.format(k,v)) # TODO pprint json
