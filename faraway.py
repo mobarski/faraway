@@ -18,7 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# version: 0.6.3
+from __future__ import print_function
+import os
+import sys
+import json
+from tempfile import TemporaryFile
 
 # CORE ssh+beeline obudowane cli/api "dla ludzi"
 # CORE jeden plik ala bottle
@@ -28,19 +32,14 @@
 # CORE dziala na windows i linux
 # CORE prosta instalacja (szczegolnie windows) i konfiguracja
 
-from __future__ import print_function
-import os
-import sys
-import json
-from tempfile import TemporaryFile
+VERSION = "0.6.4"
 
-# TEST h.load
-# TEST silent vs verbose
-
-# TODO opcje do dlm,sep,csep,ksep
-# TODO minimalizacja ilosci opcji / uspojnienie
-# TODO --version
+# TODO numeric format
+# TODO opcje do dlm,sep
 # TODO uzupelnic --help
+# TODO opcje csep,ksep
+# TODO uzupelnic --help
+# TODO uzupelnic dokumentacje
 # TODO -- 0.7 release --
 
 # TODO opcje domyslne w configu (sep,ksep,format,dlm itp)
@@ -164,7 +163,7 @@ class hadoop(Host):
 
 	# --- DUMP -----------------------------------------------------------------
 	
-	def dump(self, sql, sep=r'\t', csep=',', ksep=':', silent=False, verbose=False, header=False):
+	def dump_old(self, sql, sep=r'\t', csep=',', ksep=':', silent=False, verbose=False, header=False, echo=False):
 		tmp_name = random_name() # TODO prefix as option
 		hdfs_path = '{hdfs_tmp_dir}/{tmp_name}'
 		sql_path = '{tmp_dir}/{tmp_name}.sql'
@@ -194,27 +193,68 @@ class hadoop(Host):
 		cmd2 = self.render(cmd1,locals()).replace('"',r'\"')
 		cmd = '{ssh} "{cmd2}"'
 		cmd = self.render(cmd, locals())
-		run(cmd, input=script, out='&2')
+		run(cmd, input=script, out='&2', echo=echo)
 		
 		if header:
 			header_sql = re.sub(r'(?i)\blimit\s+\d+','',sql)
 			header_sql += ' limit 0'
-			header_cmd = self.show(header_sql,raw=True,header=True,silent=silent).replace('"',r'\"') # TODO separator
+			header_cmd = self.sql(header_sql,raw=True,header=True,silent=silent).replace('"',r'\"') # TODO separator
 			cmd = '{ssh} "{header_cmd}; hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}"'
 		else:
 			cmd = '{ssh} "hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}"'
 		return self.render(cmd, locals())
-	
+
+
+	def dump(self, sql, sep=r'\t', csep=',', ksep=':', silent=False, verbose=False, header=False):
+		workflow = ['set -e'] # finish on error
+		
+		# SQL
+		tmp_name = random_name() # TODO prefix as an option
+		hdfs_path = '{hdfs_tmp_dir}/{tmp_name}'
+		script = """
+				insert overwrite directory '{hdfs_path}'
+					row format delimited
+					fields terminated by '{sep}'
+					collection items terminated by '{csep}'
+					map keys terminated by '{ksep}'
+					stored as textfile
+					
+					{sql}
+				"""
+		script = as_one_line(script)
+		script = self.render(script, locals())
+		sql_cmd = self.sql(script, raw=True, silent=silent, verbose=verbose).replace('"',r'\"') # TODO out='&2' ???
+		workflow += [sql_cmd]
+		
+		# HEADER
+		if header:
+			# TODO co gdy srednik konczy sql
+			header_sql = re.sub(r'(?i)\blimit\s+\d+','',sql)
+			header_sql += ' limit 0'
+			header_cmd = self.sql(header_sql, raw=True, header=True, silent=silent, verbose=verbose).replace('"',r'\"') # TODO separator
+			workflow += [header_cmd]
+		
+		# DUMP
+		dump_cmd = 'hdfs dfs -text {hdfs_path}/[^.]*; hdfs dfs -rm -r -f {hdfs_path}'
+		workflow += [dump_cmd]
+		
+		# CMD
+		internal = '; '.join(workflow)
+		cmd = '{ssh} "{internal}"'
+		return self.render(cmd, locals())
+
 	# --- LOAD -----------------------------------------------------------------
 
 	# TODO replication factor
-	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':',silent=False, verbose=False):
+	def load(self, path, table, columns, sep=r'\t', csep=',', ksep=':', header=False, silent=False, verbose=False):
 		cmd = '{ssh} "{hdfs_put_cmd}; {sql_cmd}; {hdfs_rm_cmd}"'
 		if path not in ('-',''):
+			assert os.path.exists(path)
 			cmd = '{cat} {path} | '+cmd
 		tmp_hdfs_path = '{hdfs_load_dir}/{table}'
 		hdfs_put_cmd = 'hdfs dfs -put -f - {tmp_hdfs_path}'
 		hdfs_rm_cmd  = 'hdfs dfs -rm -r -f {tmp_hdfs_path}'
+		skip_header = 'TBLPROPERTIES ("skip.header.line.count"="1")' if header else ''
 		sql = """
 			DROP TABLE if exists {table};
 			CREATE TABLE {table}
@@ -223,6 +263,7 @@ class hadoop(Host):
 				FIELDS terminated by '{sep}'
 				COLLECTION ITEMS terminated by '{csep}'
 				MAP KEYS terminated by '{ksep}'
+				{skip_header}
 				;
 			LOAD DATA
 				INPATH '{tmp_hdfs_path}'
@@ -231,15 +272,15 @@ class hadoop(Host):
 		"""
 		sql = as_one_line(sql)
 		sql = self.render(sql,locals())
-		sql_cmd = self.show(sql, raw=True, silent=silent, verbose=verbose).replace('"',r'\"')
+		sql_cmd = self.sql(sql, raw=True, silent=silent, verbose=verbose).replace('"',r'\"')
 		return self.render(cmd,locals())
 		
 	
 	# --- COLUMNS --------------------------------------------------------------
 	
-	def columns(self, table):
-		cmd = self.show('describe '+table)
-		raw_meta = run(cmd,mode=3)
+	def columns(self, table, silent=False, verbose=False, echo=False):
+		cmd = self.sql('describe '+table, silent=silent,verbose=verbose)
+		raw_meta = run(cmd,mode=3,echo=echo)
 		lines = raw_meta.split('\n') # py3 ERROR
 		out = []
 		for line in lines:
@@ -252,9 +293,9 @@ class hadoop(Host):
 
 	# --- META -----------------------------------------------------------------
 	
-	def meta(self, table):
-		cmd = self.show('show create table '+table,silent=True) # XXX silent=silent
-		raw_meta = run(cmd,mode=3)
+	def meta(self, table, silent=False, verbose=False, echo=False):
+		cmd = self.sql('show create table '+table, silent=silent,verbose=verbose)
+		raw_meta = run(cmd,mode=3,echo=echo)
 		meta = {}
 		
 		meta['create_table'] = raw_meta
@@ -306,6 +347,7 @@ def run(cmd, out=None, err=None, input=None, aux=None, aux2=None, mode=None, ech
 		print('\nINPUT:',file=sys.stderr)
 		print(input,file=sys.stderr)
 		print('',file=sys.stderr)
+		sys.stderr.flush()
 		
 	# execute
 	if mode==0:
@@ -387,13 +429,16 @@ parser = argparse.ArgumentParser(add_help=False
 		)
 	)
 parser.add_argument('--help',help='print help',action='help')
-parser.add_argument('-h','--header',help='include header',action='store_const',const=1)
+parser.add_argument('--version', action='version', version='faraway '+VERSION)
+
+parser.add_argument('action',type=str,help='action',choices=['sql','dump','load','vars'])
+parser.add_argument('argv',help='action specific arguments (described below)',nargs='*')
+
+parser.add_argument('-h','--header',help='include header (sql, dump) / skip header (load)',action='store_const',const=1)
 parser.add_argument('-s','--silent',help='silent beeline',action='store_const',const=1)
 parser.add_argument('-v','--verbose',help='verbose beeline',action='store_const',const=1)
-parser.add_argument('-e','--echo',help='echo commands',action='store_const',const=1)
-parser.add_argument('action',type=str,help='action',choices=['sql','dump','load','vars'])
-parser.add_argument('-f',type=str,help='file format (as in beeline)',choices=['tsv2','csv2','dsv','table','vertical','xmlattr','xmlelements','tsv','csv'])
-parser.add_argument('argv',help='action specific arguments (described below)',nargs='*')
+parser.add_argument('-e','--echo',help='echo ssh commands',action='store_const',const=1)
+parser.add_argument('-f',type=str,help='beeline file format (sql action)',choices=['tsv2','csv2','dsv','table','vertical','xmlattr','xmlelements','tsv','csv'])
 
 parser.add_argument('-n','--name',type=str,help='connection name')
 parser.add_argument('-t','--tags',type=str,help='connection tags (comma separated)')
@@ -439,8 +484,8 @@ if __name__=="__main__":
 		table = argv[1]
 		columns = argv[2]
 		# TODO header
-		cmd = h.load(path,table,columns)
-		run(cmd, input=sys.stdin if path=='-' else None)
+		cmd = h.load(path,table,columns,header=header,silent=silent,verbose=verbose)
+		run(cmd, input=sys.stdin if path=='-' else None, echo=echo)
 	
 	# VARS
 	elif action=='vars':
